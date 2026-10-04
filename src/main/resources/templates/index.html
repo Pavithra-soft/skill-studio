@@ -21,19 +21,24 @@
         <div class="table-head">
             <div>
                 <h2>Learn your skills</h2>
-                <p class="muted">Catalog skills are authored for senior Java backend interviews, most important concepts first. Unknown skills get a generic huddle — no model required.</p>
+                <p class="muted">Pick a skill, then a concept. Generate a clean tutor card. Ask the chatbot in text — it can speak the answer. Coding standards and design patterns (including SOLID on Java) sit on the skill.</p>
             </div>
+            <p class="hint" id="llmStatus"
+               th:text="${llmEnabled} ? 'Tutor model · ' + llmProvider : 'Tutor search uses the catalog. Set GEMINI_API_KEY to let ChatClient rewrite cards.'">status</p>
         </div>
         <div class="learn-topics" id="skillButtons" role="group" aria-label="Skills">
-            <button type="button" class="learn-chip skill-chip" th:each="skill : ${learnSkills}"
-                    th:attr="data-skill=${skill.key()}" th:text="${skill.name()}">Java</button>
+            <span class="skill-chip-wrap" th:each="skill : ${learnSkills}">
+                <button type="button" class="learn-chip skill-chip" th:attr="data-skill=${skill.key()}" th:text="${skill.name()}">Java</button>
+                <button type="button" class="skill-delete" th:attr="data-delete-skill=${skill.key()}" title="Remove skill" aria-label="Remove skill">×</button>
+            </span>
         </div>
         <div class="skill-generate">
-            <label class="form-label" for="skillLearnQuery">Or type a skill</label>
+            <label class="form-label" for="skillLearnQuery">Add a skill or generate this concept</label>
             <div class="skill-generate-row">
                 <input class="form-control" id="skillLearnQuery" type="text"
-                       placeholder="e.g. Redis Streams, GraphQL, Testcontainers">
-                <button type="button" class="btn btn-dark" id="skillLearnGenerate">Generate lesson</button>
+                       placeholder="New skill name, or leave blank to refresh the selected concept">
+                <button type="button" class="btn btn-dark" id="skillLearnGenerate">Add skill</button>
+                <button type="button" class="btn btn-primary" id="conceptLearnGenerate" disabled>Generate this concept</button>
             </div>
         </div>
         <p class="form-label" id="conceptFilterLabel" hidden>Filter by concept</p>
@@ -51,18 +56,42 @@
             <button type="button" class="studio-tab" data-tab="depth">Depth</button>
             <button type="button" class="studio-tab" data-tab="interview">Interview</button>
             <button type="button" class="studio-tab" data-tab="examples">Examples</button>
-            <button type="button" class="studio-tab" data-tab="standards">Standards</button>
-            <button type="button" class="studio-tab" data-tab="patterns">Patterns</button>
+            <button type="button" class="studio-tab" data-tab="standards">Standards <span class="tab-count" id="standardsCount"></span></button>
+            <button type="button" class="studio-tab" data-tab="patterns">Patterns <span class="tab-count" id="patternsCount"></span></button>
             <button type="button" class="studio-tab" data-tab="project">Project</button>
         </nav>
         <div class="studio-layout">
             <div class="studio-main">
+                <section class="standards-panel" id="skillStandards" hidden>
+                    <div class="standards-head">
+                        <div>
+                            <p class="learn-kicker">Coding standards for this skill</p>
+                            <h3 id="skillStandardsHeading">Coding standards</h3>
+                            <p class="hint" id="skillStandardsLead">These rules belong to the skill, not to a concept page. Paging below does not change them.</p>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-dark" id="skillStandardsOpen">View all standards</button>
+                    </div>
+                    <div class="standards-grid" id="skillStandardsBody"></div>
+                </section>
+                <nav class="lesson-pager" id="lessonPager" hidden aria-label="Concept pages"></nav>
                 <article class="learn-article" id="skillLesson" aria-live="polite">
                     <p class="empty">Pick a skill button to open the huddle.</p>
                 </article>
-                <nav class="lesson-pager" id="lessonPager" hidden aria-label="Concept pages"></nav>
             </div>
-            <aside class="studio-basket" id="studioBasket">
+            <aside class="studio-side">
+                <section class="tutor-panel" id="tutorPanel">
+                    <h3>Learning tutor</h3>
+                    <p class="hint" id="tutorHint">Ask a question on the open skill or concept. Answers are text and can be spoken. Quiz me pulls an interview question from the catalog.</p>
+                    <div class="tutor-log" id="tutorLog" aria-live="polite"></div>
+                    <textarea class="form-control" id="tutorInput" rows="2" placeholder="e.g. When do I use ConcurrentHashMap?"></textarea>
+                    <div class="tutor-actions">
+                        <button type="button" class="btn btn-primary btn-sm" id="tutorAsk" disabled>Ask</button>
+                        <button type="button" class="btn btn-outline-dark btn-sm" id="tutorQuiz" disabled>Quiz me</button>
+                        <button type="button" class="btn btn-outline-dark btn-sm" id="tutorSpeak" disabled>Speak last answer</button>
+                    </div>
+                    <p class="hint" id="tutorStatus">Pick a skill to chat.</p>
+                </section>
+                <aside class="studio-basket" id="studioBasket">
                 <h3>Project basket</h3>
                 <p class="hint">Add the open skill or a concept, then download a compiling Spring Boot studio that applies those coding standards and patterns.</p>
                 <ul class="studio-basket-list" id="studioBasketList"></ul>
@@ -72,6 +101,7 @@
                     <button type="button" class="btn btn-primary btn-sm" id="studioDownload" disabled>Download project</button>
                 </div>
                 <p class="hint" id="studioBasketStatus">Basket is empty.</p>
+            </aside>
             </aside>
         </div>
     </section>

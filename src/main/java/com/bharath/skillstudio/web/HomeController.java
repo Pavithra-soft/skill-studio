@@ -17,6 +17,8 @@ public class HomeController {
     @GetMapping("/")
     public String home(Model model) {
         model.addAttribute("learnSkills", skillLessonService.listSkills());
+        model.addAttribute("llmEnabled", skillLessonService.llmEnabled());
+        model.addAttribute("llmProvider", skillLessonService.llmProvider());
         return "index";
     }
 }

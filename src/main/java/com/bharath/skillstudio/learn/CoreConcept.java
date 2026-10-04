@@ -12,6 +12,10 @@ public class CoreConcept {
     private String example = "";
     private String useCase = "";
     private String depth = "";
+    private String trap = "";
+    private String takeaway = "";
+    private boolean generated;
+    private List<String> points = new ArrayList<>();
     private List<InterviewCard> interviews = new ArrayList<>();
     private List<CodeSample> samples = new ArrayList<>();
 
@@ -48,6 +52,27 @@ public class CoreConcept {
     public CoreConcept sample(String title, String code, String notes) {
         String body = code == null ? "" : code.stripIndent();
         samples.add(new CodeSample(title, "java", body, notes));
+        return this;
+    }
+
+    public CoreConcept points(String... lines) {
+        if (lines != null) {
+            for (String line : lines) {
+                if (line != null && !line.isBlank()) {
+                    this.points.add(line.trim());
+                }
+            }
+        }
+        return this;
+    }
+
+    public CoreConcept trap(String trap) {
+        setTrap(trap);
+        return this;
+    }
+
+    public CoreConcept takeaway(String takeaway) {
+        setTakeaway(takeaway);
         return this;
     }
 
@@ -108,6 +133,38 @@ public class CoreConcept {
 
     public void setDepth(String depth) {
         this.depth = depth == null ? "" : depth;
+    }
+
+    public String getTrap() {
+        return trap;
+    }
+
+    public void setTrap(String trap) {
+        this.trap = trap == null ? "" : trap;
+    }
+
+    public String getTakeaway() {
+        return takeaway;
+    }
+
+    public void setTakeaway(String takeaway) {
+        this.takeaway = takeaway == null ? "" : takeaway;
+    }
+
+    public boolean isGenerated() {
+        return generated;
+    }
+
+    public void setGenerated(boolean generated) {
+        this.generated = generated;
+    }
+
+    public List<String> getPoints() {
+        return points;
+    }
+
+    public void setPoints(List<String> points) {
+        this.points = points == null ? new ArrayList<>() : new ArrayList<>(points);
     }
 
     public List<InterviewCard> getInterviews() {

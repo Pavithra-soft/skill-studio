@@ -47,6 +47,23 @@ class SkillLessonPaginationTest {
         assertThat(filtered.getConcepts()).hasSize(1);
         assertThat(filtered.getConcepts().getFirst().getSlug()).isEqualTo(slug);
         assertThat(filtered.getPage()).isEqualTo(0);
-        assertThat(filtered.getCatalog()).hasSize(page0.getCatalog().size());
+    }
+
+    @Test
+    void omittedPageReturnsEveryJavaConceptAndStandards() {
+        SkillLesson all = service.lesson("java");
+        assertThat(all.getConcepts()).hasSize(all.getCatalog().size());
+        assertThat(all.getConcepts()).hasSizeGreaterThan(4);
+        assertThat(all.getStandards()).isNotEmpty();
+        assertThat(all.getTotalPages()).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void everyCatalogLessonIncludesStandards() {
+        for (SkillCurriculum.Outline outline : SkillCurriculum.all()) {
+            assertThat(service.lesson(outline.key()).getStandards())
+                    .as(outline.key())
+                    .isNotEmpty();
+        }
     }
 }

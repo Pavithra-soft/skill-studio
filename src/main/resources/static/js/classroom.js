@@ -18,7 +18,11 @@
         tab: "overview",
         lesson: null,
         conceptIndex: [],
-        basket: { skills: {}, concepts: {} }
+        basket: { skills: {}, concepts: {} },
+        conversationId: "studio-" + Math.random().toString(36).slice(2, 10),
+        lastTutorVoice: "",
+        pendingQuiz: false,
+        llm: false
     };
 
     function $(id) {
@@ -154,7 +158,7 @@
     }
 
     function hasVoice() {
-        return Boolean(state.lessonVoice);
+        return Boolean(state.lesson);
     }
 
     function syncVoiceButtons() {
@@ -251,7 +255,15 @@
             resumeSpeech();
             return;
         }
-        speakText(state.lessonTitle, state.lessonVoice);
+        if (state.tab === "standards") {
+            speakText((state.skillName || "Skill") + " standards", standardsScript(state.lesson));
+            return;
+        }
+        if (state.tab === "patterns") {
+            speakText((state.skillName || "Skill") + " patterns", patternsScript(state.lesson));
+            return;
+        }
+        speakText(state.lessonTitle, pageScript(state.lesson, visibleConcepts()));
     }
 
     function escapeHtml(value) {
@@ -262,6 +274,143 @@
             .replaceAll("\"", "&quot;");
     }
 
+    function conceptTabs() {
+        return state.tab !== "standards" && state.tab !== "patterns" && state.tab !== "project";
+    }
+
+    function totalPages() {
+        const n = ((state.lesson && state.lesson.concepts) || []).length;
+        return Math.max(1, Math.ceil(n / PAGE_SIZE));
+    }
+
+    function pageBounds() {
+        const n = ((state.lesson && state.lesson.concepts) || []).length;
+        const from = n === 0 ? 0 : state.page * PAGE_SIZE + 1;
+        const to = Math.min(n, state.page * PAGE_SIZE + PAGE_SIZE);
+        return { from, to, n };
+    }
+
+    function visibleConcepts() {
+        const all = (state.lesson && state.lesson.concepts) || [];
+        if (state.conceptSlug) {
+            return all.filter((concept) => concept.slug === state.conceptSlug);
+        }
+        const start = state.page * PAGE_SIZE;
+        return all.slice(start, start + PAGE_SIZE);
+    }
+
+    function clampPage() {
+        const max = totalPages() - 1;
+        if (state.page > max) {
+            state.page = Math.max(0, max);
+        }
+        if (state.page < 0) {
+            state.page = 0;
+        }
+    }
+
+    function pageScript(lesson, concepts) {
+        if (!lesson) {
+            return "";
+        }
+        const bits = ["Alright. This is a working session on " + (lesson.name || "this skill") + "."];
+        const bounds = pageBounds();
+        if (!state.conceptSlug && bounds.n > PAGE_SIZE) {
+            bits.push("Concepts " + bounds.from + " to " + bounds.to + " of " + bounds.n + ".");
+        }
+        if (lesson.summary && state.page === 0 && !state.conceptSlug) {
+            bits.push(lesson.summary);
+        }
+        (concepts || []).forEach((concept) => {
+            bits.push(concept.title + ".");
+            (concept.points || []).slice(0, 6).forEach((point) => bits.push(point));
+            if (!(concept.points && concept.points.length) && (concept.depth || concept.why)) {
+                bits.push(concept.depth || concept.why || "");
+            }
+            if (concept.trap) {
+                bits.push("Watch-out. " + concept.trap);
+            }
+            if (concept.takeaway) {
+                bits.push("Takeaway. " + concept.takeaway);
+            }
+            if (concept.useCase) {
+                bits.push("In production. " + concept.useCase);
+            }
+            (concept.interviews || []).slice(0, 1).forEach((card) => {
+                bits.push("Interview question. " + card.question);
+                if (card.answer) {
+                    bits.push(card.answer);
+                }
+            });
+            if ((concept.samples && concept.samples.length) || concept.example) {
+                bits.push("There are programming examples on the screen. I will not read the code.");
+            }
+        });
+        bits.push("That is this page. Pause me any time.");
+        return bits.filter(Boolean).join(" ");
+    }
+
+    function standardsScript(lesson) {
+        if (!lesson) {
+            return "";
+        }
+        const bits = ["Coding standards for " + (lesson.name || "this skill") + "."];
+        (lesson.standards || []).forEach((rule) => {
+            bits.push(rule.title + ".");
+            bits.push(rule.rule || "");
+            if (rule.why) {
+                bits.push("Why. " + rule.why);
+            }
+        });
+        return bits.filter(Boolean).join(" ");
+    }
+
+    function patternsScript(lesson) {
+        if (!lesson) {
+            return "";
+        }
+        const bits = ["Design patterns for " + (lesson.name || "this skill") + "."];
+        (lesson.patterns || []).forEach((rule) => {
+            bits.push(rule.name + ".");
+            bits.push(rule.intent || "");
+            if (rule.how) {
+                bits.push("In this domain. " + rule.how);
+            }
+        });
+        return bits.filter(Boolean).join(" ");
+    }
+
+    function syncUrl() {
+        const params = new URLSearchParams();
+        if (state.skillKey) {
+            params.set("skill", state.skillKey);
+        }
+        if (state.conceptSlug) {
+            params.set("concept", state.conceptSlug);
+        } else if (state.page > 0) {
+            params.set("page", String(state.page + 1));
+        }
+        if (state.tab && state.tab !== "overview") {
+            params.set("tab", state.tab);
+        }
+        const query = params.toString();
+        const next = query ? ("/?" + query) : "/";
+        if (window.location.pathname + window.location.search !== next) {
+            history.replaceState(null, "", next);
+        }
+    }
+
+    function readUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const pageRaw = parseInt(params.get("page") || "1", 10);
+        return {
+            skill: params.get("skill") || "",
+            concept: params.get("concept") || "",
+            tab: params.get("tab") || "overview",
+            page: Number.isFinite(pageRaw) ? Math.max(0, pageRaw - 1) : 0
+        };
+    }
+
     function paragraphs(text) {
         return String(text || "")
             .split(/\n{2,}/)
@@ -270,23 +419,35 @@
     }
 
     function conceptBlock(concept, kicker) {
+        const points = (concept.points || []).map((point) => `<li>${escapeHtml(point)}</li>`).join("");
+        const generated = concept.generated ? '<span class="generated-pill">Generated</span>' : "";
         return `<section class="learn-block learn-${concept.kind === "release" ? "lab" : "teach"}">
             <p class="learn-kicker">${escapeHtml(kicker)}</p>
-            <h3>${escapeHtml(concept.title || "")}</h3>
+            <h3>${escapeHtml(concept.title || "")}${generated}</h3>
             <p>${escapeHtml(concept.why || "")}</p>
+            ${points ? `<ol class="lesson-points">${points}</ol>` : ""}
             ${concept.useCase ? `<p class="learn-use"><strong>In production.</strong> ${escapeHtml(concept.useCase)}</p>` : ""}
+            ${concept.trap ? `<p class="trap-line"><strong>Watch-out.</strong> ${escapeHtml(concept.trap)}</p>` : ""}
+            ${concept.takeaway ? `<p class="takeaway-line"><strong>Takeaway.</strong> ${escapeHtml(concept.takeaway)}</p>` : ""}
             ${concept.example ? `<pre class="preview tiny">${escapeHtml(concept.example)}</pre>` : ""}
         </section>`;
     }
 
     function depthBlock(concept) {
-        const body = paragraphs(concept.depth || concept.why || "")
-            .map((part) => `<p>${escapeHtml(part)}</p>`)
+        const paras = paragraphs(concept.depth || "")
+            .map((part, index) => `<p><strong>${index + 1}.</strong> ${escapeHtml(part)}</p>`)
             .join("");
+        const fallback = !paras && (concept.why || "")
+            ? `<p>${escapeHtml(concept.why)}</p>`
+            : paras;
+        const points = (concept.points || []).map((point) => `<li>${escapeHtml(point)}</li>`).join("");
         return `<section class="learn-block learn-teach">
             <p class="learn-kicker">In depth</p>
             <h3>${escapeHtml(concept.title || "")}</h3>
-            ${body}
+            ${points ? `<ol class="lesson-points">${points}</ol>` : ""}
+            ${fallback}
+            ${concept.trap ? `<p class="trap-line"><strong>Watch-out.</strong> ${escapeHtml(concept.trap)}</p>` : ""}
+            ${concept.takeaway ? `<p class="takeaway-line"><strong>Takeaway.</strong> ${escapeHtml(concept.takeaway)}</p>` : ""}
             ${concept.useCase ? `<p class="learn-use"><strong>In production.</strong> ${escapeHtml(concept.useCase)}</p>` : ""}
         </section>`;
     }
@@ -330,7 +491,7 @@
     }
 
     function paneHtml(lesson, tab) {
-        const concepts = lesson.concepts || [];
+        const concepts = visibleConcepts();
         const head = `<h3>${escapeHtml(lesson.name || "Skill")}</h3>`;
         if (tab === "depth") {
             return head + (concepts.map(depthBlock).join("") || "<p class=\"empty\">No depth notes.</p>");
@@ -342,9 +503,7 @@
             return head + (concepts.map(exampleBlock).join("") || "<p class=\"empty\">No examples.</p>");
         }
         if (tab === "standards") {
-            const rules = (lesson.standards || []).map((rule) => ruleBlock(rule.title, rule.rule, rule.why)).join("");
-            return head + "<p class=\"huddle-lead\">Coding standards for this skill. The generated project encodes them as StudioRules and markdown.</p>"
-                + (rules || "<p class=\"empty\">No authored standards for this skill.</p>");
+            return "";
         }
         if (tab === "patterns") {
             const rules = (lesson.patterns || []).map((rule) => ruleBlock(rule.name, rule.intent, rule.how, "In this domain.")).join("");
@@ -352,16 +511,21 @@
                 + (rules || "<p class=\"empty\">No authored patterns for this skill.</p>");
         }
         if (tab === "project") {
-            const conceptList = concepts.map((concept) => `<li>${escapeHtml(concept.title)}</li>`).join("");
+            const conceptList = (lesson.concepts || []).map((concept) => `<li>${escapeHtml(concept.title)}</li>`).join("");
             return `${head}
                 <p class="huddle-lead">Generate a compiling Spring Boot studio from the basket. It includes README, coding standards, design patterns, and one demo class per selected concept.</p>
                 <p>Open skill: <strong>${escapeHtml(lesson.name || "")}</strong></p>
-                <ul>${conceptList || "<li>Concepts on this page</li>"}</ul>
+                <ul>${conceptList || "<li>Concepts on this skill</li>"}</ul>
                 <p class="hint">Use Add skill / Add concept on the right, then Download project. The zip is a compiling Spring Boot studio.</p>`;
         }
         const overview = concepts.map((concept) => conceptBlock(concept, "Widely used")).join("");
+        const bounds = pageBounds();
+        const pageNote = !state.conceptSlug && bounds.n > PAGE_SIZE
+            ? `<p class="hint">Showing concepts ${bounds.from}–${bounds.to} of ${bounds.n}. Use the pager for the next set.</p>`
+            : "";
         return `${head}
             <p class="huddle-lead">${escapeHtml(lesson.summary || "")}</p>
+            ${pageNote}
             ${overview}`;
     }
 
@@ -371,7 +535,9 @@
         if (!nav) {
             return;
         }
-        const items = lesson.catalog || [];
+        const items = lesson.catalog && lesson.catalog.length
+            ? lesson.catalog
+            : (lesson.concepts || []).map((concept) => ({ slug: concept.slug, title: concept.title }));
         state.conceptIndex = items;
         if (!items.length) {
             nav.hidden = true;
@@ -384,35 +550,93 @@
         nav.hidden = false;
         if (label) {
             label.hidden = false;
+            const bounds = pageBounds();
+            label.textContent = state.conceptSlug
+                ? "One concept"
+                : (bounds.n > PAGE_SIZE
+                    ? ("Filter by concept · ring means this page (" + bounds.from + "–" + bounds.to + " of " + bounds.n + ")")
+                    : "Filter by concept");
         }
         const allOn = !state.conceptSlug;
+        const onPage = new Set(visibleConcepts().map((concept) => concept.slug));
         nav.innerHTML = `<button type="button" class="learn-chip${allOn ? " active" : ""}" data-concept="" aria-pressed="${allOn ? "true" : "false"}">All concepts</button>`
             + items.map((item) => {
                 const on = item.slug === state.conceptSlug;
-                return `<button type="button" class="learn-chip${on ? " active" : ""}" data-concept="${escapeHtml(item.slug)}" aria-pressed="${on ? "true" : "false"}">${escapeHtml(item.title)}</button>`;
+                const pageMark = allOn && onPage.has(item.slug) ? " on-page" : "";
+                return `<button type="button" class="learn-chip${on ? " active" : ""}${pageMark}" data-concept="${escapeHtml(item.slug)}" aria-pressed="${on ? "true" : "false"}">${escapeHtml(item.title)}</button>`;
             }).join("");
     }
 
-    function paintPager(lesson) {
+    function paintPager() {
         const pager = $("lessonPager");
         if (!pager) {
             return;
         }
-        const total = lesson.totalPages || 1;
-        const page = lesson.page || 0;
-        if (state.conceptSlug || total <= 1) {
+        const total = totalPages();
+        if (state.conceptSlug || total <= 1 || !conceptTabs()) {
             pager.hidden = true;
             pager.innerHTML = "";
             return;
         }
         pager.hidden = false;
-        const prevDisabled = page <= 0 ? "disabled" : "";
-        const nextDisabled = page >= total - 1 ? "disabled" : "";
+        const bounds = pageBounds();
+        let nums = "";
+        for (let i = 0; i < total; i++) {
+            nums += `<button type="button" class="pager-num${i === state.page ? " active" : ""}" data-page="${i}"${i === state.page ? " aria-current=\"page\"" : ""}>${i + 1}</button>`;
+        }
         pager.innerHTML = `
-            <button type="button" class="btn btn-outline-dark btn-sm" id="pagerPrev" ${prevDisabled}>Prev</button>
-            <span class="pager-status">page ${page + 1} of ${total}</span>
-            <button type="button" class="btn btn-outline-dark btn-sm" id="pagerNext" ${nextDisabled}>Next</button>
+            <button type="button" class="btn btn-outline-dark btn-sm" data-pager="prev"${state.page <= 0 ? " disabled" : ""}>Prev</button>
+            <div class="pager-nums">${nums}</div>
+            <button type="button" class="btn btn-outline-dark btn-sm" data-pager="next"${state.page >= total - 1 ? " disabled" : ""}>Next</button>
+            <span class="pager-status">Concepts ${bounds.from}–${bounds.to} of ${bounds.n}</span>
         `;
+    }
+
+    function paintStandards() {
+        const host = $("skillStandards");
+        if (!host || !state.lesson) {
+            return;
+        }
+        const rules = state.lesson.standards || [];
+        const expanded = state.tab === "standards";
+        if (!rules.length || state.tab === "project") {
+            host.hidden = true;
+            return;
+        }
+        host.hidden = false;
+        host.classList.toggle("expanded", expanded);
+        const heading = $("skillStandardsHeading");
+        if (heading) {
+            heading.textContent = "Coding standards · " + (state.lesson.name || "Skill");
+        }
+        const lead = $("skillStandardsLead");
+        if (lead) {
+            lead.textContent = expanded
+                ? "These rules apply to the whole skill. Concept paging does not change them."
+                : "These rules belong to the skill, not to a concept page. Paging below does not change them.";
+        }
+        const open = $("skillStandardsOpen");
+        if (open) {
+            open.hidden = expanded;
+        }
+        const body = $("skillStandardsBody");
+        if (body) {
+            body.innerHTML = rules.map((rule, index) => `
+                <article class="rule-card">
+                    <p class="learn-kicker">Standard ${index + 1} of ${rules.length}</p>
+                    <h3>${escapeHtml(rule.title || "")}</h3>
+                    <p>${escapeHtml(rule.rule || "")}</p>
+                    ${rule.why ? `<p class="learn-use"><strong>Why.</strong> ${escapeHtml(rule.why)}</p>` : ""}
+                </article>`).join("");
+        }
+        const count = $("standardsCount");
+        if (count) {
+            count.textContent = String(rules.length);
+        }
+        const patternsCount = $("patternsCount");
+        if (patternsCount) {
+            patternsCount.textContent = String((state.lesson.patterns || []).length);
+        }
     }
 
     function markStudioTab(tab) {
@@ -464,6 +688,11 @@
             const id = hasFocus ? state.skillKey + "/" + state.conceptSlug : "";
             addConcept.textContent = id && state.basket.concepts[id] ? "Concept added" : "Add concept";
         }
+        const genConcept = $("conceptLearnGenerate");
+        if (genConcept) {
+            genConcept.disabled = !(state.skillKey && state.conceptSlug);
+        }
+        syncTutor();
     }
 
     function basketParams() {
@@ -498,54 +727,82 @@
         state.skillName = lesson.name || "Skill";
         state.lessonTitle = lesson.name || "Skill";
         state.lessonVoice = lesson.voice || "";
-        state.page = lesson.page || 0;
+        clampPage();
         paintConceptChips(lesson);
-        paintPager(lesson);
+        paintPager();
+        paintStandards();
         markStudioTab(state.tab || "overview");
-        host.innerHTML = paneHtml(lesson, state.tab || "overview");
+        const hideArticle = state.tab === "standards";
+        host.hidden = hideArticle;
+        if (!hideArticle) {
+            host.innerHTML = paneHtml(lesson, state.tab || "overview");
+        }
         syncVoiceButtons();
-        const focus = state.conceptSlug
-            ? (lesson.concepts && lesson.concepts[0] && lesson.concepts[0].title) || "concept"
-            : lesson.name;
-        setVoiceStatus(focus + " ready. Use the tabs for depth, interview, and examples. Voice skips code.");
+        const bounds = pageBounds();
+        if (state.tab === "standards") {
+            setVoiceStatus("Coding standards for " + (lesson.name || "this skill") + " are on screen. Play reads the rules, not the code.");
+        } else if (state.conceptSlug) {
+            const title = (visibleConcepts()[0] && visibleConcepts()[0].title) || "concept";
+            setVoiceStatus(title + " ready. Use the tabs for depth, interview, and examples.");
+        } else if (bounds.n > PAGE_SIZE && conceptTabs()) {
+            setVoiceStatus((lesson.name || "Skill") + " · concepts " + bounds.from + "–" + bounds.to + " of " + bounds.n + ".");
+        } else {
+            setVoiceStatus((lesson.name || "Skill") + " ready. Coding standards stay visible above the huddle.");
+        }
         document.querySelectorAll(".skill-chip").forEach((chip) => {
             const on = chip.getAttribute("data-skill") === lesson.key;
             chip.classList.toggle("active", on);
             chip.setAttribute("aria-pressed", on ? "true" : "false");
         });
         renderBasket();
+        syncUrl();
+        syncTutor();
+    }
+
+    function goPage(page) {
+        if (!state.lesson || state.conceptSlug) {
+            return;
+        }
+        const next = Math.max(0, Math.min(page, totalPages() - 1));
+        if (next === state.page) {
+            return;
+        }
+        state.page = next;
+        renderSkillLesson(state.lesson);
+        $("skillLesson")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     function paintSkillButtons(skills) {
         const nav = $("skillButtons");
-        if (!nav || !skills || !skills.length) {
+        if (!nav) {
             return;
         }
-        const current = document.querySelector(".skill-chip.active")?.getAttribute("data-skill");
+        if (!skills) {
+            skills = [];
+        }
+        const current = state.skillKey || document.querySelector(".skill-chip.active")?.getAttribute("data-skill");
         nav.innerHTML = skills.map((skill) =>
-            `<button type="button" class="learn-chip skill-chip${skill.key === current ? " active" : ""}" data-skill="${escapeHtml(skill.key)}" aria-pressed="${skill.key === current ? "true" : "false"}">${escapeHtml(skill.name)}</button>`
+            `<span class="skill-chip-wrap">
+                <button type="button" class="learn-chip skill-chip${skill.key === current ? " active" : ""}" data-skill="${escapeHtml(skill.key)}" aria-pressed="${skill.key === current ? "true" : "false"}">${escapeHtml(skill.name)}</button>
+                <button type="button" class="skill-delete" data-delete-skill="${escapeHtml(skill.key)}" title="Remove skill" aria-label="Remove ${escapeHtml(skill.name)}">×</button>
+            </span>`
         ).join("");
     }
 
-    function loadSkill(skill, generate, concept, page) {
+    function loadSkill(skill, generate, concept) {
         if (!skill) {
             return;
         }
         const host = $("skillLesson");
         if (host) {
-            host.innerHTML = '<p class="empty">Writing the huddle…</p>';
+            host.hidden = false;
+            host.innerHTML = '<p class="empty">' + (generate && concept ? "Writing a tutor card…" : "Writing the huddle…") + "</p>";
         }
-        let path;
-        if (generate) {
-            path = "/api/generate?skill=" + encodeURIComponent(skill);
-        } else {
-            path = "/api/lesson.json?skill=" + encodeURIComponent(skill);
-            if (concept) {
-                path += "&concept=" + encodeURIComponent(concept);
-            } else {
-                const p = page == null ? state.page : page;
-                path += "&page=" + encodeURIComponent(p) + "&size=" + PAGE_SIZE;
-            }
+        let path = generate
+            ? "/api/generate?skill=" + encodeURIComponent(skill)
+            : "/api/lesson.json?skill=" + encodeURIComponent(skill);
+        if (generate && concept) {
+            path += "&concept=" + encodeURIComponent(concept);
         }
         fetch(path)
             .then((response) => {
@@ -558,17 +815,44 @@
                 if (lesson.error) {
                     throw new Error(lesson.error);
                 }
-                state.conceptSlug = concept || "";
-                if (!concept && lesson.page != null) {
-                    state.page = lesson.page;
+                if (generate && concept) {
+                    const wanted = concept;
+                    const fromConcepts = (lesson.concepts || []).find((item) => item.slug === wanted || item.title === wanted);
+                    const fromCatalog = (lesson.catalog || []).find((item) => item.slug === wanted);
+                    state.conceptSlug = (fromConcepts && fromConcepts.slug) || (fromCatalog && fromCatalog.slug) || wanted;
+                } else {
+                    state.conceptSlug = concept || "";
+                    if (state.conceptSlug) {
+                        const exists = (lesson.concepts || []).some((item) => item.slug === state.conceptSlug)
+                            || (lesson.catalog || []).some((item) => item.slug === state.conceptSlug);
+                        if (!exists) {
+                            state.conceptSlug = "";
+                        }
+                    }
                 }
+                clampPage();
                 renderSkillLesson(lesson);
+                if (generate && concept) {
+                    setVoiceStatus("Tutor card ready. Ask the chatbot, or Play trainer voice.");
+                }
             })
             .catch((err) => {
                 if (host) {
+                    host.hidden = false;
                     host.innerHTML = `<p class="flash err">${escapeHtml(err.message || "Could not load that skill.")}</p>`;
                 }
             });
+    }
+
+    function applySkillsPayload(data) {
+        paintSkillButtons((data && data.skills) || []);
+        state.llm = Boolean(data && data.llm);
+        const status = $("llmStatus");
+        if (status && data) {
+            status.textContent = data.llm
+                ? ("Tutor model · " + (data.provider || "gemini"))
+                : "Tutor search uses the catalog. Set GEMINI_API_KEY to let ChatClient rewrite cards.";
+        }
     }
 
     function loadSkills() {
@@ -577,8 +861,159 @@
         }
         fetch("/api/skills.json")
             .then((response) => response.json())
-            .then((data) => paintSkillButtons(data.skills || []))
+            .then(applySkillsPayload)
             .catch(() => {});
+    }
+
+    function deleteSkill(key) {
+        if (!key) {
+            return;
+        }
+        fetch("/api/skill/delete?skill=" + encodeURIComponent(key))
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error("Could not remove that skill.");
+                }
+                return response.json();
+            })
+            .then((data) => {
+                applySkillsPayload(data);
+                delete state.basket.skills[key];
+                Object.keys(state.basket.concepts).forEach((id) => {
+                    if (id.startsWith(key + "/")) {
+                        delete state.basket.concepts[id];
+                    }
+                });
+                if (state.skillKey === key) {
+                    state.conceptSlug = "";
+                    state.page = 0;
+                    state.tab = "overview";
+                    state.lesson = null;
+                    state.skillKey = "";
+                    state.skillName = "";
+                    const first = document.querySelector(".skill-chip");
+                    if (first) {
+                        loadSkill(first.getAttribute("data-skill"), false, "");
+                    } else {
+                        const host = $("skillLesson");
+                        if (host) {
+                            host.innerHTML = '<p class="empty">Pick a skill button to open the huddle.</p>';
+                        }
+                        syncTutor();
+                        renderBasket();
+                    }
+                } else {
+                    renderBasket();
+                }
+            })
+            .catch((err) => setVoiceStatus(err.message || "Could not remove that skill."));
+    }
+
+    function syncTutor() {
+        const ready = Boolean(state.skillKey);
+        const ask = $("tutorAsk");
+        const quiz = $("tutorQuiz");
+        const speak = $("tutorSpeak");
+        if (ask) {
+            ask.disabled = !ready;
+        }
+        if (quiz) {
+            quiz.disabled = !ready;
+        }
+        if (speak) {
+            speak.disabled = !state.lastTutorVoice;
+        }
+        const hint = $("tutorHint");
+        if (hint && ready) {
+            if (state.pendingQuiz) {
+                hint.textContent = "Quiz is open. Type your answer and hit Ask — I will score it against the catalog.";
+            } else if (state.conceptSlug) {
+                hint.textContent = "I answer from this concept first, then the rest of the catalog.";
+            } else {
+                hint.textContent = "Ask a concrete question. I retrieve the best catalog card, then answer in bullets.";
+            }
+        }
+        const status = $("tutorStatus");
+        if (status && ready && status.textContent === "Pick a skill to chat.") {
+            status.textContent = "Ask in text. Speak last answer reads it aloud.";
+        }
+    }
+
+    function appendTutor(role, text) {
+        const log = $("tutorLog");
+        if (!log) {
+            return;
+        }
+        const div = document.createElement("div");
+        div.className = "tutor-bubble " + role;
+        div.textContent = text;
+        log.appendChild(div);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function askTutor(quiz) {
+        const input = $("tutorInput");
+        const message = quiz ? "" : ((input && input.value) || "").trim();
+        const status = $("tutorStatus");
+        if (!state.skillKey) {
+            if (status) {
+                status.textContent = "Pick a skill to chat.";
+            }
+            return;
+        }
+        if (!quiz && !message) {
+            if (status) {
+                status.textContent = "Type a question first.";
+            }
+            return;
+        }
+        if (!quiz && input) {
+            appendTutor("user", message);
+            input.value = "";
+        }
+        if (status) {
+            status.textContent = quiz
+                ? "Picking a quiz question…"
+                : (state.pendingQuiz ? "Scoring your answer…" : "Finding the best catalog card…");
+        }
+        fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                skill: state.skillKey,
+                concept: state.conceptSlug || "",
+                message,
+                conversationId: state.conversationId,
+                quiz: Boolean(quiz)
+            })
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error("Tutor could not answer.");
+                }
+                return response.json();
+            })
+            .then((reply) => {
+                const answer = reply.answer || "";
+                const voice = reply.voice || answer;
+                state.lastTutorVoice = voice;
+                state.pendingQuiz = /^\s*Quiz\./i.test(answer);
+                appendTutor("bot", answer);
+                const src = (reply.sources || []).filter(Boolean).slice(0, 2).join(" · ");
+                if (status) {
+                    status.textContent = (reply.llm ? "Model · " : "Catalog · ")
+                        + (src || reply.provider || "catalog");
+                }
+                syncTutor();
+                if (quiz && voice) {
+                    speakText("Quiz", voice);
+                }
+            })
+            .catch((err) => {
+                if (status) {
+                    status.textContent = err.message || "Tutor could not answer.";
+                }
+            });
     }
 
     function bindVoiceBar() {
@@ -622,6 +1057,13 @@
         bindVoiceBar();
 
         $("skillButtons")?.addEventListener("click", (event) => {
+            const del = event.target.closest("[data-delete-skill]");
+            if (del) {
+                event.preventDefault();
+                event.stopPropagation();
+                deleteSkill(del.getAttribute("data-delete-skill"));
+                return;
+            }
             const chip = event.target.closest("[data-skill]");
             if (!chip) {
                 return;
@@ -629,30 +1071,43 @@
             state.conceptSlug = "";
             state.page = 0;
             state.tab = "overview";
-            loadSkill(chip.getAttribute("data-skill"), false, "", 0);
+            loadSkill(chip.getAttribute("data-skill"), false, "");
         });
 
         $("conceptButtons")?.addEventListener("click", (event) => {
             const chip = event.target.closest("[data-concept]");
-            if (!chip || !state.skillKey) {
+            if (!chip || !state.lesson) {
                 return;
             }
             const concept = chip.getAttribute("data-concept") || "";
-            state.page = 0;
-            loadSkill(state.skillKey, false, concept, 0);
+            state.conceptSlug = concept;
+            if (concept) {
+                const index = (state.lesson.concepts || []).findIndex((item) => item.slug === concept);
+                if (index >= 0) {
+                    state.page = Math.floor(index / PAGE_SIZE);
+                }
+                if (state.tab === "standards" || state.tab === "patterns" || state.tab === "project") {
+                    state.tab = "overview";
+                }
+            }
+            renderSkillLesson(state.lesson);
         });
 
         $("lessonPager")?.addEventListener("click", (event) => {
-            const prev = event.target.closest("#pagerPrev");
-            const next = event.target.closest("#pagerNext");
+            const prev = event.target.closest("[data-pager=\"prev\"]");
+            const next = event.target.closest("[data-pager=\"next\"]");
+            const num = event.target.closest("[data-page]");
             if (!state.skillKey || state.conceptSlug) {
                 return;
             }
             if (prev && !prev.disabled) {
-                loadSkill(state.skillKey, false, "", Math.max(0, state.page - 1));
+                goPage(state.page - 1);
             }
             if (next && !next.disabled) {
-                loadSkill(state.skillKey, false, "", state.page + 1);
+                goPage(state.page + 1);
+            }
+            if (num) {
+                goPage(Number(num.getAttribute("data-page")));
             }
         });
 
@@ -662,11 +1117,16 @@
                 return;
             }
             state.tab = tab.getAttribute("data-tab") || "overview";
-            markStudioTab(state.tab);
-            const host = $("skillLesson");
-            if (host) {
-                host.innerHTML = paneHtml(state.lesson, state.tab);
+            renderSkillLesson(state.lesson);
+        });
+
+        $("skillStandardsOpen")?.addEventListener("click", () => {
+            if (!state.lesson) {
+                return;
             }
+            state.tab = "standards";
+            renderSkillLesson(state.lesson);
+            $("skillStandards")?.scrollIntoView({ behavior: "smooth", block: "start" });
         });
 
         $("studioAddSkill")?.addEventListener("click", () => {
@@ -682,8 +1142,8 @@
                 return;
             }
             const id = state.skillKey + "/" + state.conceptSlug;
-            const title = (state.lesson && state.lesson.concepts && state.lesson.concepts[0] && state.lesson.concepts[0].title)
-                || state.conceptSlug;
+            const match = ((state.lesson && state.lesson.concepts) || []).find((item) => item.slug === state.conceptSlug);
+            const title = (match && match.title) || state.conceptSlug;
             state.basket.concepts[id] = (state.skillName || state.skillKey) + " / " + title;
             if (!state.basket.skills[state.skillKey]) {
                 state.basket.skills[state.skillKey] = state.skillName || state.skillKey;
@@ -721,14 +1181,41 @@
         $("skillLearnGenerate")?.addEventListener("click", () => {
             const query = ($("skillLearnQuery")?.value || "").trim();
             if (!query) {
-                setVoiceStatus("Type a skill first.");
+                if (state.skillKey && state.conceptSlug) {
+                    loadSkill(state.skillKey, true, state.conceptSlug);
+                    return;
+                }
+                setVoiceStatus("Type a skill first, or select a concept to generate.");
                 return;
             }
             state.conceptSlug = "";
             state.page = 0;
             state.tab = "overview";
-            loadSkill(query, true, "", 0);
+            loadSkill(query, true, "");
             window.setTimeout(loadSkills, 400);
+        });
+
+        $("conceptLearnGenerate")?.addEventListener("click", () => {
+            if (!state.skillKey || !state.conceptSlug) {
+                setVoiceStatus("Select a skill and a concept first.");
+                return;
+            }
+            loadSkill(state.skillKey, true, state.conceptSlug);
+        });
+
+        $("tutorAsk")?.addEventListener("click", () => askTutor(false));
+        $("tutorQuiz")?.addEventListener("click", () => askTutor(true));
+        $("tutorSpeak")?.addEventListener("click", () => {
+            if (!state.lastTutorVoice) {
+                return;
+            }
+            speakText("Tutor", state.lastTutorVoice);
+        });
+        $("tutorInput")?.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                askTutor(false);
+            }
         });
 
         $("skillLearnQuery")?.addEventListener("keydown", (event) => {
@@ -742,9 +1229,20 @@
         syncVoiceButtons();
         renderBasket();
         loadSkills();
+        const fromUrl = readUrl();
+        if (fromUrl.tab) {
+            state.tab = fromUrl.tab;
+        }
+        if (fromUrl.page) {
+            state.page = fromUrl.page;
+        }
+        if (fromUrl.concept) {
+            state.conceptSlug = fromUrl.concept;
+        }
         const first = document.querySelector(".skill-chip");
-        if (first) {
-            loadSkill(first.getAttribute("data-skill"), false, "", 0);
+        const startSkill = fromUrl.skill || (first && first.getAttribute("data-skill")) || "";
+        if (startSkill) {
+            loadSkill(startSkill, false, fromUrl.concept);
         }
     }
 

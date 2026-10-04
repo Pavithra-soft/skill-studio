@@ -7,6 +7,18 @@ spring:
     name: skill-studio
   thymeleaf:
     cache: false
+  ai:
+    chat:
+      client:
+        enabled: false
+    model:
+      chat: none
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          model: ${GEMINI_MODEL:gemini-3.8-flash}
+          temperature: 0.2
 
 management:
   endpoints:

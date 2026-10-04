@@ -132,7 +132,16 @@ public final class SpringAiCatalog {
                                                 .call()
                                                 .content();
                                         """,
-                                "Retrieve is the selector. Generate is ChatClient."),
+                                "Retrieve is the selector. Generate is ChatClient.")
+                        .points(
+                                "What: RAG is two verbs — retrieve evidence, then generate from it.",
+                                "This classroom's AI search is LibrarySearch: score catalog chunks, then ChatClient.",
+                                "A giant prompt is not RAG. If you skipped retrieve, you just talked a lot.",
+                                "Thin answers are usually thin retrieve — fix chunks and the query first.",
+                                "System line: speak only from evidence. Do not invent APIs or versions.",
+                                "Interview: embeddings upgrade retrieve; they do not replace generate.")
+                        .trap("Pasting the whole resume into the prompt is not retrieve — it is hope.")
+                        .takeaway("Search the catalog first. Then ask the model to speak only from those hits."),
                 Concepts.of("Prompt templates",
                                 "Prompts are product copy. They do not belong in an eighty-line Java string. PromptTemplate keeps wording in a file with placeholders.",
                                 "Cover-letter wording in a .st file meant Apply and a stream button could not drift.")

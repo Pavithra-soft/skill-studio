@@ -1,5 +1,10 @@
 package com.bharath.skillstudio.learn;
 
+import com.bharath.skillstudio.ai.ChatReply;
+import com.bharath.skillstudio.ai.LlmSupport;
+import com.bharath.skillstudio.ai.TutorService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -18,20 +23,70 @@ public class SkillLessonService {
     private static final String[] STEPS = {"First up", "Next", "Then", "After that", "Finally"};
 
     private final Map<String, SkillLesson> generated = new ConcurrentHashMap<>();
+    private final Map<String, CoreConcept> overlays = new ConcurrentHashMap<>();
+    private final Set<String> hidden = ConcurrentHashMap.newKeySet();
+    private final TutorService tutor;
+
+    public SkillLessonService() {
+        this.tutor = new TutorService(LlmSupport.disabled());
+    }
+
+    @Autowired
+    public SkillLessonService(ObjectProvider<TutorService> tutor) {
+        TutorService provided = tutor == null ? null : tutor.getIfAvailable();
+        this.tutor = provided != null ? provided : new TutorService(LlmSupport.disabled());
+    }
+
+    public boolean llmEnabled() {
+        return tutor.llmEnabled();
+    }
+
+    public String llmProvider() {
+        return tutor.provider();
+    }
 
     public List<SkillButton> listSkills() {
         Map<String, SkillButton> buttons = new LinkedHashMap<>();
         for (SkillCurriculum.Outline outline : SkillCurriculum.all()) {
-            buttons.put(outline.key(), new SkillButton(outline.key(), outline.name(), "catalog"));
+            if (hidden.contains(outline.key())) {
+                continue;
+            }
+            buttons.put(outline.key(), new SkillButton(outline.key(), outline.name(), "catalog", true));
         }
         for (SkillLesson lesson : generated.values()) {
-            buttons.putIfAbsent(lesson.getKey(), new SkillButton(lesson.getKey(), lesson.getName(), "custom"));
+            if (hidden.contains(lesson.getKey())) {
+                continue;
+            }
+            buttons.putIfAbsent(lesson.getKey(), new SkillButton(lesson.getKey(), lesson.getName(), "custom", true));
         }
         return new ArrayList<>(buttons.values());
     }
 
+    public List<SkillButton> deleteSkill(String skill) {
+        if (skill == null || skill.isBlank()) {
+            throw new IllegalArgumentException("Pick a skill to remove.");
+        }
+        String raw = skill.trim();
+        Optional<SkillCurriculum.Outline> catalog = SkillCurriculum.byKey(raw).or(() -> SkillCurriculum.resolve(raw));
+        if (catalog.isPresent()) {
+            hidden.add(catalog.get().key());
+            overlays.keySet().removeIf(item -> item.startsWith(catalog.get().key() + "/"));
+            return listSkills();
+        }
+        String key = raw.startsWith("custom:") ? raw : customKey(raw);
+        generated.remove(key);
+        overlays.keySet().removeIf(item -> item.startsWith(key + "/"));
+        hidden.remove(key);
+        return listSkills();
+    }
+
+    public ChatReply chat(String skill, String concept, String message, String conversationId, boolean quiz) {
+        SkillLesson lesson = applyOverlays(loadLesson(skill == null || skill.isBlank() ? "java" : skill));
+        return tutor.chat(lesson, concept, message, conversationId, quiz);
+    }
+
     public SkillLesson lesson(String skill) {
-        return lesson(skill, null, 0, DEFAULT_PAGE_SIZE);
+        return lesson(skill, null, null, null);
     }
 
     public SkillLesson lesson(String skill, String concept, Integer page, Integer size) {
@@ -90,26 +145,89 @@ public class SkillLessonService {
     }
 
     public SkillLesson generate(String skill) {
+        return generate(skill, null);
+    }
+
+    public SkillLesson generate(String skill, String concept) {
         if (skill == null || skill.isBlank()) {
             throw new IllegalArgumentException("Type a skill to generate a lesson.");
         }
         Optional<SkillCurriculum.Outline> outline = SkillCurriculum.resolve(skill);
         if (outline.isPresent()) {
-            return paginate(assemble(outline.get()), null, 0, DEFAULT_PAGE_SIZE);
+            hidden.remove(outline.get().key());
+        } else {
+            hidden.remove(skill.startsWith("custom:") ? skill : customKey(skill));
+        }
+        if (concept != null && !concept.isBlank()) {
+            return generateConcept(skill, concept);
+        }
+        if (outline.isPresent()) {
+            return paginate(assemble(outline.get()), null, null, null);
         }
         String key = customKey(skill);
+        hidden.remove(key);
         SkillLesson cached = generated.get(key);
         if (cached != null) {
-            return paginate(copyLesson(cached), null, 0, DEFAULT_PAGE_SIZE);
+            return paginate(applyOverlays(copyLesson(cached)), null, null, null);
         }
         SkillLesson lesson = genericLesson(skill);
         lesson.setKey(key);
         lesson.setName(skill.trim());
+        lesson.setConcepts(polishAll(lesson.getConcepts()));
         lesson.setStandards(new ArrayList<>(SkillPlaybook.standards(key)));
         lesson.setPatterns(new ArrayList<>(SkillPlaybook.patterns(key)));
         lesson.setVoice(voiceFor(lesson));
         generated.put(key, copyLesson(lesson));
-        return paginate(lesson, null, 0, DEFAULT_PAGE_SIZE);
+        return paginate(lesson, null, null, null);
+    }
+
+    private SkillLesson generateConcept(String skill, String concept) {
+        SkillLesson lesson = applyOverlays(loadLesson(skill));
+        String slug = ConceptSlug.of(concept);
+        CoreConcept focus = null;
+        for (CoreConcept item : lesson.getConcepts()) {
+            if (item == null) {
+                continue;
+            }
+            if (slug.equals(item.getSlug()) || slug.equals(ConceptSlug.of(item.getTitle()))) {
+                focus = item;
+                break;
+            }
+        }
+        if (focus == null) {
+            focus = new CoreConcept(concept.trim(),
+                    "Generated huddle for " + concept.trim() + " under " + lesson.getName() + ".",
+                    "Describe a production incident and the default shape.");
+            focus = LessonCopy.polish(focus);
+        }
+        CoreConcept enriched = tutor.enrich(lesson, focus);
+        String overlayKey = lesson.getKey() + "/" + enriched.getSlug();
+        overlays.put(overlayKey, enriched);
+        if (lesson.getKey().startsWith("custom:")) {
+            SkillLesson stored = generated.get(lesson.getKey());
+            if (stored != null) {
+                replaceConcept(stored, enriched);
+            }
+        }
+        SkillLesson fresh = applyOverlays(loadLesson(lesson.getKey()));
+        return paginate(fresh, null, null, null);
+    }
+
+    private static void replaceConcept(SkillLesson lesson, CoreConcept enriched) {
+        List<CoreConcept> next = new ArrayList<>();
+        boolean replaced = false;
+        for (CoreConcept item : lesson.getConcepts()) {
+            if (item != null && enriched.getSlug().equals(item.getSlug())) {
+                next.add(enriched);
+                replaced = true;
+            } else {
+                next.add(item);
+            }
+        }
+        if (!replaced) {
+            next.add(enriched);
+        }
+        lesson.setConcepts(next);
     }
 
     private SkillLesson loadLesson(String skill) {
@@ -119,12 +237,15 @@ public class SkillLessonService {
         Optional<SkillCurriculum.Outline> outline = SkillCurriculum.byKey(skill)
                 .or(() -> SkillCurriculum.resolve(skill));
         if (outline.isPresent()) {
+            if (hidden.contains(outline.get().key())) {
+                throw new IllegalArgumentException("That skill was removed. Generate it again to restore.");
+            }
             return assemble(outline.get());
         }
         String key = skill.startsWith("custom:") ? skill : customKey(skill);
         SkillLesson cached = generated.get(key);
         if (cached != null) {
-            return copyLesson(cached);
+            return applyOverlays(copyLesson(cached));
         }
         return generateFresh(displayName(skill));
     }
@@ -134,6 +255,7 @@ public class SkillLessonService {
         SkillLesson lesson = genericLesson(skill);
         lesson.setKey(key);
         lesson.setName(skill.trim());
+        lesson.setConcepts(polishAll(lesson.getConcepts()));
         lesson.setStandards(new ArrayList<>(SkillPlaybook.standards(key)));
         lesson.setPatterns(new ArrayList<>(SkillPlaybook.patterns(key)));
         lesson.setVoice(voiceFor(lesson));
@@ -146,7 +268,7 @@ public class SkillLessonService {
         lesson.setKey(outline.key());
         lesson.setName(outline.name());
         lesson.setSummary(outline.summary());
-        lesson.setConcepts(new ArrayList<>(outline.concepts()));
+        lesson.setConcepts(applyOverlays(outline.key(), polishAll(outline.concepts())));
         lesson.setStandards(new ArrayList<>(SkillPlaybook.standards(outline.key())));
         lesson.setPatterns(new ArrayList<>(SkillPlaybook.patterns(outline.key())));
         lesson.setVoice(voiceFor(lesson));
@@ -183,6 +305,16 @@ public class SkillLessonService {
             lesson.setPage(0);
             lesson.setSize(1);
             lesson.setTotalPages(1);
+            lesson.setVoice(voiceFor(lesson));
+            return lesson;
+        }
+
+        if (page == null && size == null) {
+            lesson.setConcepts(new ArrayList<>(all));
+            lesson.setPage(0);
+            lesson.setSize(Math.max(catalog.size(), 1));
+            lesson.setTotalPages(catalog.isEmpty() ? 1
+                    : (int) Math.ceil(catalog.size() / (double) DEFAULT_PAGE_SIZE));
             lesson.setVoice(voiceFor(lesson));
             return lesson;
         }
@@ -410,6 +542,52 @@ public class SkillLessonService {
         return copy;
     }
 
-    public record SkillButton(String key, String name, String kind) {
+    private SkillLesson applyOverlays(SkillLesson lesson) {
+        lesson.setConcepts(applyOverlays(lesson.getKey(), lesson.getConcepts()));
+        return lesson;
+    }
+
+    private List<CoreConcept> applyOverlays(String skillKey, List<CoreConcept> concepts) {
+        List<CoreConcept> out = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        if (concepts != null) {
+            for (CoreConcept item : concepts) {
+                if (item == null) {
+                    continue;
+                }
+                CoreConcept polished = LessonCopy.polish(item);
+                CoreConcept overlay = overlays.get(skillKey + "/" + polished.getSlug());
+                CoreConcept next = overlay == null ? polished : LessonCopy.copy(overlay);
+                out.add(next);
+                seen.add(next.getSlug());
+            }
+        }
+        for (Map.Entry<String, CoreConcept> entry : overlays.entrySet()) {
+            if (!entry.getKey().startsWith(skillKey + "/")) {
+                continue;
+            }
+            CoreConcept extra = entry.getValue();
+            if (extra != null && extra.getSlug() != null && seen.add(extra.getSlug())) {
+                out.add(LessonCopy.copy(extra));
+            }
+        }
+        return out;
+    }
+
+    private static List<CoreConcept> polishAll(List<CoreConcept> concepts) {
+        List<CoreConcept> out = new ArrayList<>();
+        if (concepts == null) {
+            return out;
+        }
+        for (CoreConcept item : concepts) {
+            out.add(LessonCopy.polish(item));
+        }
+        return out;
+    }
+
+    public record SkillButton(String key, String name, String kind, boolean deletable) {
+        public SkillButton(String key, String name, String kind) {
+            this(key, name, kind, true);
+        }
     }
 }

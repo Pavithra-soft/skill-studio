@@ -38,6 +38,14 @@ class SkillCurriculumTest {
     }
 
     @Test
+    void javaIncludesSolidConcept() {
+        List<String> titles = SkillCurriculum.all().getFirst().concepts().stream()
+                .map(CoreConcept::getTitle)
+                .toList();
+        assertThat(titles).anyMatch(title -> title.toUpperCase().contains("SOLID"));
+    }
+
+    @Test
     void skillsFollowInterviewPriorityOrder() {
         assertThat(SkillCurriculum.all().stream().map(SkillCurriculum.Outline::key).toList())
                 .containsExactly(

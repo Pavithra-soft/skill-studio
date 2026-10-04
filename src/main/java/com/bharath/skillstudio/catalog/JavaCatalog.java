@@ -48,7 +48,58 @@ public final class JavaCatalog {
                                         seen.put(key, Status.NEW);
                                         // key.setTitle("principal"); // lost entry — hash moved, equals did not
                                         """,
-                                "If the key can change, it was not a key. Use a record."),
+                                "If the key can change, it was not a key. Use a record.")
+                        .points(
+                                "What: == is identity; equals is value; hashCode finds the bucket.",
+                                "Contract: if a.equals(b) then a.hashCode() == b.hashCode(). Override both or neither.",
+                                "Records: value equality is free — right for Money and JobId.",
+                                "JPA: generated id is null before persist — do not put transients in a HashSet.",
+                                "Trap: mutating a field used in hashCode strands the entry in the old bucket.",
+                                "Interview: say instanceof for Hibernate proxies, not getClass(), and write the HashMap test.")
+                        .trap("Never put a mutable field into equals or hashCode if the object will live in a map.")
+                        .takeaway("Pick identity or value, test two instances in a HashSet, then a HashMap get."),
+                Concepts.of("SOLID in production Java",
+                                "SOLID is five design rules for change. Interviewers want a class you would split, not a poster.",
+                                "A portal client that fetched JSON, parsed it, and wrote the database had three reasons to change. Splitting client, parser, and repository let Adzuna change without touching mail.")
+                        .depth("""
+                                Single responsibility: one reason to change. A class that both talks HTTP and maps JSON will break when either vendor moves. Open/closed: add a MatchScorer implementation, do not grow an if-else of providers. Liskov: a FakeClock that returns null is not a Clock — subtypes honor contracts including exceptions. Interface segregation: do not force a read-only finder to implement delete. Dependency inversion: SearchService depends on JobPortalClient, not AdzunaClient; the container injects the adapter.
+
+                                These are design patterns in rule form. Strategy is DIP plus SRP. A gateway is DIP. A decorator is OCP without editing the core type. Composition over inheritance is how you avoid LSP violations from deep concrete subclasses.
+
+                                In this classroom the Patterns tab lists each SOLID rule with a production example. Generate this concept if you want a fresh tutor card. In interviews, pick one class from your last project and say which rule it broke and how you split it.
+                                """)
+                        .points(
+                                "S — one reason to change. HTTP client ≠ JSON parser ≠ repository.",
+                                "O — add an implementation; do not edit a provider switch forever.",
+                                "L — a subtype must honor the parent contract, including nulls and exceptions.",
+                                "I — a reader should not depend on delete.",
+                                "D — depend on an interface you own; inject the vendor adapter.",
+                                "Related patterns: Strategy, Adapter, Decorator, Gateway, composition over inheritance.",
+                                "Interview: name a class you split and which rule it violated.")
+                        .trap("A God service with 40 injected fields is every SOLID violation at once.")
+                        .takeaway("SOLID is how you keep a class cheap to change — show a split, not a mnemonic.")
+                        .qa("Give an example of SRP in a Spring service.",
+                                "JobSearchService orchestrates. AdzunaClient fetches. A mapper turns JSON into PortalJob. Three types, three reasons to change.",
+                                "What would you split first in a 1,000-line service?")
+                        .qa("How is Strategy different from if (provider == GEMINI)?",
+                                "Strategy is OCP plus DIP: a new implementation, injected. The if-else is closed against extension and open to merge conflicts.",
+                                "Where does Liskov show up in tests?")
+                        .sample("Depend on an abstraction you own",
+                                """
+                                        public interface JobPortalClient {
+                                            List<PortalJob> search(String skills, String location);
+                                        }
+
+                                        @Service
+                                        public class JobSearchService {
+                                            private final JobPortalClient portals;
+
+                                            public JobSearchService(JobPortalClient portals) {
+                                                this.portals = portals;
+                                            }
+                                        }
+                                        """,
+                                "AdzunaClient implements JobPortalClient. Tests inject a fake."),
                 Concepts.of("Collections that pay rent",
                                 "Most production Java is HashMap, ArrayList, and ConcurrentHashMap. Know their contracts, fail-fast iterators, and what happens under concurrent write. Fancy collections are a footnote until these three are automatic.",
                                 "A job-match cache used a plain HashMap from a servlet thread and a mail poller. The map corrupted under load; ConcurrentHashMap with a size bound and a TTL policy was the fix, not a bigger heap.")
@@ -74,7 +125,16 @@ public final class JavaCatalog {
                                             return Status.QUEUED;
                                         });
                                         """,
-                                "putIfAbsent and compute are the API. get plus put is a race."),
+                                "putIfAbsent and compute are the API. get plus put is a race.")
+                        .points(
+                                "What: ArrayList for random access, ArrayDeque for queues, HashMap then ConcurrentHashMap.",
+                                "LinkedList almost never pays rent — pointer chasing beats the CPU cache.",
+                                "HashMap iteration is fail-fast. ConcurrentModificationException is a gift.",
+                                "CHM is not a synchronized HashMap. Use putIfAbsent, compute, or merge.",
+                                "CHM forbids null keys and values so containsKey is not ambiguous.",
+                                "Interview: name the collection, the second writer, and the compound-action API.")
+                        .trap("get then put on ConcurrentHashMap is still a race.")
+                        .takeaway("Pick the collection for the concurrent writer, not for the happy path."),
                 Concepts.of("Exceptions and try-with-resources",
                                 "Checked versus unchecked is a boundary decision. try-with-resources is how you close JDBC, streams, and HTTP bodies. Swallowing exceptions and leaking connections are the same outage with different stack traces.",
                                 "A portal client caught IOException, logged at debug, and returned empty listings. The connection pool starved because the response body was never closed. try-with-resources on the Response made the incident obvious instead of silent.")
@@ -98,7 +158,16 @@ public final class JavaCatalog {
                                             return parser.read(body);
                                         }
                                         """,
-                                "If parse throws, the response still closes. Screen only."),
+                                "If parse throws, the response still closes. Screen only.")
+                        .points(
+                                "What: exceptions skip the return path — use them for the path callers must not forget.",
+                                "Unchecked for programmer errors; wrap checked I/O at the boundary.",
+                                "try-with-resources closes in reverse and keeps suppressed exceptions.",
+                                "Wrap once, log once. catch-log-rethrow in every layer hides the first failure.",
+                                "InterruptedException: restore the flag if you cannot stop.",
+                                "Interview: empty search from a swallowed IOException is an outage, not a product state.")
+                        .trap("catch (Exception e) { log; return empty; } turns a downed portal into a blank page.")
+                        .takeaway("Close with try-with-resources, translate at the boundary, log once."),
                 Concepts.of("Concurrency: happens-before, volatile, synchronized",
                                 "Threads do not see each other's writes unless a happens-before edge exists. volatile is visibility and ordering for one variable. synchronized is mutual exclusion plus that edge. Guessing with Thread.sleep is not a memory model.",
                                 "A feature flag written by an admin thread stayed false for servlet workers because the boolean was a plain field. volatile, or better a dedicated config bean published after construction, made the flip visible.")
@@ -129,7 +198,16 @@ public final class JavaCatalog {
                                             }
                                         }
                                         """,
-                                "The reference is volatile. The Config object should be immutable."),
+                                "The reference is volatile. The Config object should be immutable.")
+                        .points(
+                                "What: a write is visible only across a happens-before edge.",
+                                "volatile: visibility and ordering for one variable, not atomic increment.",
+                                "synchronized / ReentrantLock: exclusion plus the edge. Keep the section tiny.",
+                                "Do not block on I/O inside synchronized — that pins virtual threads.",
+                                "Double-checked locking without volatile on the instance is still wrong.",
+                                "Interview: draw who writes, who reads, and the edge between them.")
+                        .trap("volatile int count; count++ is still a race.")
+                        .takeaway("Prefer java.util.concurrent, then a lock, then volatile, then nothing."),
                 Concepts.of("Virtual threads",
                                 "Platform threads are scarce OS threads. Virtual threads are cheap tasks the JVM mounts on carriers. Blocking JDBC or HTTP parks the virtual thread, not the carrier — unless you pin it.",
                                 "A Spring MVC service that calls three downstream HTTP APIs per request kept a blocking style with virtual threads instead of rewriting the stack in WebFlux.")
@@ -154,7 +232,16 @@ public final class JavaCatalog {
                                             view.render(profile, jobs);
                                         });
                                         """,
-                                "Readable blocking calls. The carrier is not stuck in JDBC if you do not pin."),
+                                "Readable blocking calls. The carrier is not stuck in JDBC if you do not pin.")
+                        .points(
+                                "What: virtual threads are cheap tasks; platform threads are scarce OS threads.",
+                                "Blocking JDK calls unmount the virtual thread from its carrier.",
+                                "Pinning: blocking while holding synchronized glues you to the carrier.",
+                                "They do not replace a connection pool — size pools for the database.",
+                                "CPU-bound work does not get cheaper; you only bought wait-time.",
+                                "Interview: MVC + JDBC + virtual threads vs a full WebFlux rewrite.")
+                        .trap("A million virtual threads and twenty Postgres connections is still twenty queries.")
+                        .takeaway("Use virtual threads for blocking I/O. Keep the pool as the bulkhead."),
                 Concepts.of("java.time, not Date",
                                 "Date and Calendar are mutable instants pretending to be calendars. Instant, OffsetDateTime, and an injected Clock are what production systems use. Store UTC, format in the user's zone at the edge.",
                                 "An India hiring portal showing interview slots stored local times without a zone. DST and a UTC server made candidates show up an hour off. timestamptz plus Asia/Kolkata at render time fixed it.")
@@ -176,7 +263,16 @@ public final class JavaCatalog {
                                         Instant deadline = clock.instant().plus(Duration.ofHours(24));
                                         OffsetDateTime shown = deadline.atZone(ZoneId.of("Asia/Kolkata")).toOffsetDateTime();
                                         """,
-                                "Tests pass Clock.fixed. Production uses Clock.systemUTC."),
+                                "Tests pass Clock.fixed. Production uses Clock.systemUTC.")
+                        .points(
+                                "What: Instant is a point on the timeline. Date is a mutable Instant in disguise.",
+                                "Store timestamptz / Instant. Convert to the user zone only when you render.",
+                                "Inject Clock. Instant.now() is untestable.",
+                                "LocalDateTime has no zone — wrong for an interview slot that must be unique.",
+                                "Duration is time-based; Period is date-based. Timeouts are Durations.",
+                                "Interview: say what you store, what you serialize, how 9am local is tested.")
+                        .trap("Storing a local time without a zone will lie twice a year.")
+                        .takeaway("Store UTC instants. Inject Clock. Format in Asia/Kolkata at the edge."),
                 Concepts.of("Records as DTOs",
                                 "Records are transparent carriers: constructor, accessors, equals, hashCode, toString. That is what you want on an API boundary. They are a poor domain entity if the object must mutate or hide invariants behind setters.",
                                 "A payment API returned an amount as a mutable class. A missing currency field bound as null and reached the ledger. A record with a compact constructor rejected the payload at the edge.")
@@ -206,7 +302,16 @@ public final class JavaCatalog {
                                             }
                                         }
                                         """,
-                                "Invalid money never enters the service."),
+                                "Invalid money never enters the service.")
+                        .points(
+                                "What: records are transparent carriers — constructor, accessors, equals, hashCode.",
+                                "Compact constructors validate before the object exists.",
+                                "Right for Money, JobId, events. Wrong for JPA entities that mutate.",
+                                "A new component is a breaking constructor change.",
+                                "If you need a setter, you wanted a class.",
+                                "Interview: boundary versus interior, and compact constructors instead of Lombok.")
+                        .trap("Do not make a JPA entity a record — identity, proxies, and mutation fight the model.")
+                        .takeaway("Records at the API edge. Mutable types stay inside the aggregate."),
                 Concepts.of("Streams grouping, not everything",
                                 "groupingBy and partitioningBy replace nested maps. A twelve-step map-filter-flatMap chain is how people hide a null. Prefer a for-loop when you have side effects, checked exceptions, or an early exit.",
                                 "A tracker dashboard that counted applications by status drifted because three nested loops disagreed. One groupingBy with counting() became the single source.")
@@ -228,7 +333,16 @@ public final class JavaCatalog {
                                         Map<String, Long> byStatus = apps.stream()
                                                 .collect(Collectors.groupingBy(App::status, Collectors.counting()));
                                         """,
-                                "One pass. No mutable map in the loop."),
+                                "One pass. No mutable map in the loop.")
+                        .points(
+                                "What: groupingBy and partitioningBy replace nested maps.",
+                                "Name the output type in one breath or write a loop.",
+                                "forEach sending mail inside a stream hides failures and order.",
+                                "parallel() on a request thread steals the common ForkJoinPool.",
+                                "Checked exceptions do not flow through lambdas without wrapping.",
+                                "Interview: write groupingBy from memory and say when you would refuse a stream.")
+                        .trap("A twelve-step map-filter-flatMap chain is how people hide a null.")
+                        .takeaway("Streams for bulk transforms. Loops for side effects, checked exceptions, early exit."),
                 Concepts.of("Optional at boundaries",
                                 "Optional is a return type for 'this might be absent'. It is not a field, not a parameter, and not a substitute for a clear domain error. orElse versus orElseGet is the first trap.",
                                 "A UserFinder returned null from three layers. A NPE in a Thymeleaf page was the report. Returning Optional from the repository and mapping to 404 in the controller made absence a contract.")
@@ -255,7 +369,16 @@ public final class JavaCatalog {
                                             return findByEmail(email).orElseThrow(() -> new NotFound(email));
                                         }
                                         """,
-                                "The controller maps NotFound to 404. Empty is not a 500."),
+                                "The controller maps NotFound to 404. Empty is not a 500.")
+                        .points(
+                                "What: Optional is a return type for 'this might be absent'.",
+                                "Never a field, never a parameter, never a substitute for a domain error.",
+                                "orElse(compute()) always runs compute. orElseGet is lazy.",
+                                "orElseThrow when absence is exceptional at this layer.",
+                                "Return an empty list, not Optional of a collection.",
+                                "Interview: boundary return type, and orElse versus orElseGet.")
+                        .trap("orElse(query()) hits the database even on a cache hit.")
+                        .takeaway("Optional at the service return. Domain errors stay exceptions or result types."),
                 Concepts.of("Sealed types and pattern matching",
                                 "Sealed interfaces name the closed set of subtypes. Pattern-matching switch keeps a protocol in one place. instanceof pyramids rot because the fourth type is added in one branch and forgotten in another.",
                                 "Mail classification that branched recruiter versus interview versus noise stayed readable when a fourth intent showed up — the compiler demanded the new case on a sealed type.")
@@ -285,6 +408,15 @@ public final class JavaCatalog {
                                         }
                                         """,
                                 "A new permitted type is a compile reminder.")
+                        .points(
+                                "What: sealed interfaces name the closed set of subtypes.",
+                                "Pattern-matching switch keeps a protocol in one place.",
+                                "A missed branch is a compile error. instanceof chains fail open.",
+                                "When JSON from a vendor can grow, do not seal — keep a default.",
+                                "Keep deconstruction one level deep.",
+                                "Interview: contrast with visitor, and say when default is still required.")
+                        .trap("instanceof pyramids rot because the fourth type is added in one branch and forgotten in another.")
+                        .takeaway("Seal closed protocols. Switch exhaustively. Leave vendor JSON open.")
         );
     }
 }
