@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: skill-studio
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: JAVA_TOOL_OPTIONS
+        value: -Xmx400m
+      - key: SPRING_PROFILES_ACTIVE
+        value: cloud

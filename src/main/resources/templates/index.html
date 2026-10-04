@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Skill Studio</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header class="brand-bar">
+    <div class="brand-mark">SS</div>
+    <div>
+        <p class="brand-kicker">Skill Studio</p>
+        <h1>Interview classroom</h1>
+        <p>Filter by skill and concept. Each huddle has depth, interview Q&amp;A, programming examples, coding standards, and design patterns. Download a compiling Spring Boot studio from the basket. Voice skips code.</p>
+    </div>
+</header>
+<main class="main">
+    <section class="card panel learn-panel" id="skillClassroom">
+        <div class="table-head">
+            <div>
+                <h2>Learn your skills</h2>
+                <p class="muted">Catalog skills are authored for senior Java backend interviews, most important concepts first. Unknown skills get a generic huddle — no model required.</p>
+            </div>
+        </div>
+        <div class="learn-topics" id="skillButtons" role="group" aria-label="Skills">
+            <button type="button" class="learn-chip skill-chip" th:each="skill : ${learnSkills}"
+                    th:attr="data-skill=${skill.key()}" th:text="${skill.name()}">Java</button>
+        </div>
+        <div class="skill-generate">
+            <label class="form-label" for="skillLearnQuery">Or type a skill</label>
+            <div class="skill-generate-row">
+                <input class="form-control" id="skillLearnQuery" type="text"
+                       placeholder="e.g. Redis Streams, GraphQL, Testcontainers">
+                <button type="button" class="btn btn-dark" id="skillLearnGenerate">Generate lesson</button>
+            </div>
+        </div>
+        <p class="form-label" id="conceptFilterLabel" hidden>Filter by concept</p>
+        <div class="learn-topics" id="conceptButtons" role="group" aria-label="Concepts" hidden></div>
+        <div class="voice-bar">
+            <button type="button" class="btn btn-primary btn-sm js-voice-play" disabled>Play trainer voice</button>
+            <button type="button" class="btn btn-outline-dark btn-sm js-voice-pause" disabled>Pause</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm js-voice-stop" disabled>Stop</button>
+            <button type="button" class="btn btn-outline-dark btn-sm js-voice-calm">Calm pace</button>
+            <button type="button" class="btn btn-outline-dark btn-sm js-voice-brisk">Brisk pace</button>
+            <span class="hint js-voice-status">Pick a skill. I will not read the code.</span>
+        </div>
+        <nav class="studio-tabs" id="studioTabs" hidden>
+            <button type="button" class="studio-tab active" data-tab="overview">Overview</button>
+            <button type="button" class="studio-tab" data-tab="depth">Depth</button>
+            <button type="button" class="studio-tab" data-tab="interview">Interview</button>
+            <button type="button" class="studio-tab" data-tab="examples">Examples</button>
+            <button type="button" class="studio-tab" data-tab="standards">Standards</button>
+            <button type="button" class="studio-tab" data-tab="patterns">Patterns</button>
+            <button type="button" class="studio-tab" data-tab="project">Project</button>
+        </nav>
+        <div class="studio-layout">
+            <div class="studio-main">
+                <article class="learn-article" id="skillLesson" aria-live="polite">
+                    <p class="empty">Pick a skill button to open the huddle.</p>
+                </article>
+                <nav class="lesson-pager" id="lessonPager" hidden aria-label="Concept pages"></nav>
+            </div>
+            <aside class="studio-basket" id="studioBasket">
+                <h3>Project basket</h3>
+                <p class="hint">Add the open skill or a concept, then download a compiling Spring Boot studio that applies those coding standards and patterns.</p>
+                <ul class="studio-basket-list" id="studioBasketList"></ul>
+                <div class="studio-basket-actions">
+                    <button type="button" class="btn btn-outline-dark btn-sm" id="studioAddSkill" disabled>Add skill</button>
+                    <button type="button" class="btn btn-outline-dark btn-sm" id="studioAddConcept" disabled>Add concept</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="studioDownload" disabled>Download project</button>
+                </div>
+                <p class="hint" id="studioBasketStatus">Basket is empty.</p>
+            </aside>
+        </div>
+    </section>
+</main>
+<script th:src="@{/js/classroom.js}"></script>
+</body>
+</html>

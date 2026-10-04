@@ -1,0 +1,4 @@
+# Optional cloud profile. Defaults already bind PORT and actuator health.
+spring:
+  application:
+    name: skill-studio
