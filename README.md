@@ -35,13 +35,13 @@ The app binds `server.port=${PORT:8080}` so PaaS port injection works.
 
 ## Deploy on Render (free)
 
-1. Push this repo to GitHub.
-2. On [Render](https://render.com), **New → Blueprint** and select the repo (`render.yaml` + `Dockerfile`).
-3. Optional: set `SPRING_PROFILES_ACTIVE=cloud` (already in the blueprint).
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Pavithra-soft/skill-studio)
+
+1. Push is already on GitHub: [Pavithra-soft/skill-studio](https://github.com/Pavithra-soft/skill-studio).
+2. Open [Deploy to Render](https://render.com/deploy?repo=https://github.com/Pavithra-soft/skill-studio) (or **New → Blueprint** and select the repo).
+3. Render reads `render.yaml` + `Dockerfile`. No API keys required.
 4. Open the `*.onrender.com` URL. Health check is `/actuator/health`.
 5. Free instances sleep after idle time; the first request after sleep can take a minute.
-
-No API keys are required.
 
 ## HTTP
 
